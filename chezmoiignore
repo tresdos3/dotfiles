@@ -1,0 +1,59 @@
+# Secrets: never sync
+.ssh/**
+.gnupg/**
+.gnupg_pre_2.1/**
+.id
+.username
+.helper
+.emulator_console_auth_token
+.claude.json
+.config/github-copilot/**
+.config/opencode/**
+.wakatime/**
+
+# Histories and local state
+.zsh_history*
+.bash_history
+.python_history
+.lesshst
+.viminfo
+.zsh_sessions/**
+.wget-hsts
+
+# Caches / tool data
+.cache/**
+.local/share/**
+.android/**
+.codeium/**
+.gradle/**
+.pub-cache/**
+.vscode/**
+.cursor/**
+.trae/**
+.bun/**
+.cargo/**
+.npm/**
+.yarn/**
+.gem/**
+.gemini/**
+.spicetify/**
+
+# Internal helper files (kept in the repo, not applied to $HOME)
+scripts/**
+
+# Backups, leftovers, macOS-only junk
+*.backup-*
+*.bak
+.DS_Store
+.CFUserTextEncoding
+.Trash/**
+.zshrc.pre-oh-my-zsh
+.shell.pre-oh-my-zsh
+.gitflow_export
+
+# Nested data inside managed directories
+.config/nvim/.git
+.config/zed/conversations/**
+.config/zed/embeddings/**
+.config/zed/.tmp*
+.config/zed/settings_backup.json

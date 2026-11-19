@@ -1,0 +1,86 @@
+# Managed by chezmoi — cross-platform (macOS + Linux)
+{{- if eq .chezmoi.os "darwin" }}
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export PATH="$PATH:$ANDROID_HOME/emulator"
+export PATH="$PATH:$ANDROID_HOME/platform-tools"
+{{- end }}
+
+# Enable Powerlevel10k instant prompt (keep near top; nothing may write before it)
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
+{{- if eq .chezmoi.os "darwin" }}
+source /opt/homebrew/share/powerlevel10k/powerlevel10k.zsh-theme
+{{- else }}
+source "${XDG_DATA_HOME:-$HOME/.local/share}/powerlevel10k/powerlevel10k.zsh-theme"
+{{- end }}
+source ~/.p10k.zsh
+
+# Completion system (required for tab completion and alias completion)
+autoload -Uz compinit
+if [[ -n ~/.zcompdump(#qN.mh+24) ]]; then
+  compinit -C
+else
+  compinit
+fi
+# Let aliases complete on the command line and complete their arguments
+setopt completealiases
+
+# fnm (Node version manager)
+eval "$(fnm env --use-on-cd --shell zsh)"
+
+# Rust / Cargo
+export PATH="$HOME/.cargo/bin:$PATH"
+
+. "$HOME/.local/bin/env"
+
+# pnpm
+{{- if eq .chezmoi.os "darwin" }}
+export PNPM_HOME='{{ .chezmoi.homeDir }}/Library/pnpm'
+{{- else }}
+export PNPM_HOME='{{ .chezmoi.homeDir }}/.local/share/pnpm'
+{{- end }}
+case ":$PATH:" in
+  *":$PNPM_HOME/bin:"*) ;;
+  *) export PATH="$PNPM_HOME/bin:$PATH" ;;
+esac
+# pnpm end
+
+{{- if eq .chezmoi.os "darwin" }}
+PATH=~/.console-ninja/.bin:$PATH
+
+# Added by Antigravity
+export PATH="{{ .chezmoi.homeDir }}/.antigravity/antigravity/bin:$PATH"
+
+# Added by Antigravity IDE
+export PATH="{{ .chezmoi.homeDir }}/.antigravity-ide/antigravity-ide/bin:$PATH"
+
+export PATH=$PATH:{{ .chezmoi.homeDir }}/.spicetify
+export DYLD_LIBRARY_PATH="/opt/homebrew/opt/expat/lib:$DYLD_LIBRARY_PATH"
+{{- end }}
+
+alias uvr="uv run"
+alias mdv="glow"
+alias venv-new="python3 -m venv .venv"
+alias venv-on="source .venv/bin/activate"
+alias venv-pip="pip install -r"
+alias fdev="fastapi dev"
+alias py="python3"
+
+# Alias argument completion
+compdef _glow mdv
+compdef _pip venv-pip
+
+# Plugins (must be sourced after the aliases above)
+{{- if eq .chezmoi.os "darwin" }}
+[[ -f /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh ]] && \
+  source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+[[ -f /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh ]] && \
+  source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+{{- else }}
+[[ -f "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh" ]] && \
+  source "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
+[[ -f "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh" ]] && \
+  source "${XDG_DATA_HOME:-$HOME/.local/share}/zsh/plugins/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+{{- end }}

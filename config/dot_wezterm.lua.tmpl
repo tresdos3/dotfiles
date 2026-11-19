@@ -1,0 +1,394 @@
+-- Managed by chezmoi — cross-platform (macOS + Linux)
+local wezterm = require("wezterm")
+
+local config = {}
+
+config.automatically_reload_config = true
+
+-- Font (fall back to a font that is available on Linux)
+config.font = wezterm.font_with_fallback({
+	"JetBrains Mono",
+	"DejaVu Sans Mono",
+})
+config.font_size = 15.0
+
+-- Ligatures
+config.harfbuzz_features = {
+	"calt=1",
+	"clig=1",
+	"liga=1",
+}
+
+-- Tokyo Night
+config.color_scheme = "Tokyo Night"
+
+-- Transparency
+config.window_background_opacity = 0.85
+if wezterm.target_triple:find("apple") then
+	config.macos_window_background_blur = 20
+end
+
+-- Windows Size
+config.initial_cols = 140
+config.initial_rows = 40
+
+-- Window
+config.window_decorations = "TITLE | RESIZE"
+
+config.window_padding = {
+	left = 14,
+	right = 14,
+	top = 10,
+	bottom = 10,
+}
+
+-- Performance
+-- OpenGL instead of WebGpu: WebGpu ignores window_background_opacity on this
+-- WezTerm build (20240203), which broke terminal transparency for Neovim
+config.front_end = "OpenGL"
+config.max_fps = 120
+
+-- Cursor
+config.default_cursor_style = "BlinkingBlock"
+
+-- Fullscreen transparency workaround:
+-- entering fullscreen forces the window opaque (wez/wezterm#4925), so
+-- window_background_opacity is ignored. Re-applying config via
+-- set_config_overrides on the fullscreen transition resets it.
+local fs_state = {}
+wezterm.on("window-resized", function(window, pane)
+	local id = window.window_id
+	local dims = window:get_dimensions()
+	if fs_state[id] == dims.is_full_screen then
+		return
+	end
+	fs_state[id] = dims.is_full_screen
+	local overrides = window:get_config_overrides() or {}
+	if dims.is_full_screen then
+		overrides.window_background_opacity = config.window_background_opacity
+	else
+		overrides.window_background_opacity = nil
+	end
+	window:set_config_overrides(overrides)
+end)
+
+-- Scrollback
+config.scrollback_lines = 10000
+
+-- Tabs
+config.enable_tab_bar = true
+config.hide_tab_bar_if_only_one_tab = true
+config.use_fancy_tab_bar = false
+
+-- Shell
+config.default_prog = {
+	"/bin/zsh",
+	"-l",
+}
+
+--------------------------------------------------------------------------------
+-- Status bar: workspace · dir · git (izq.) | fecha · hora · batería (der.)
+--------------------------------------------------------------------------------
+-- Cadencia del evento update-status. WezTerm garantiza que solo hay un handler
+-- en vuelo a la vez, así que los ticks nunca se acumulan aunque uno tarde.
+config.status_update_interval = 1000 -- ms
+
+-- Paleta Tokyo Night: paneles azul marino oscuro con acentos cyan/púrpura y
+-- batería en verde. Mismos tonos que color_scheme = "Tokyo Night".
+local SB = {
+	strip = "#16161e", -- panel marino detrás de cada celda
+	chip = "#24283b", -- marino más claro para el chip de workspace
+	sep = "#565f89", -- separadores y micro-etiquetas
+	date = "#a9b1d6", -- fecha, atenuada
+	cyan = "#7dcfff", -- directorio de trabajo + reloj
+	purple = "#bb9af7", -- workspace + rama git
+	green = "#9ece6a", -- batería / estados positivos
+	warn = "#f7768e", -- batería críticamente baja
+}
+
+-- Una celda con color de fondo, texto y peso explícitos. Emitir el peso en
+-- todas las celdas evita que "Bold" se filtre a las celdas vecinas.
+local function cell(items, bg, fg, text, bold)
+	items[#items + 1] = { Background = { Color = bg } }
+	items[#items + 1] = { Foreground = { Color = fg } }
+	items[#items + 1] = { Attribute = { Intensity = bold and "Bold" or "Normal" } }
+	items[#items + 1] = { Text = text }
+end
+
+local function separator(items)
+	cell(items, SB.strip, SB.sep, " · ")
+end
+
+-- Nombre del workspace de esta ventana (nil si WezTerm no puede responder).
+local function workspace_name(window)
+	local ok, name = pcall(function()
+		return window:active_workspace()
+	end)
+	if ok and type(name) == "string" and name ~= "" then
+		return name
+	end
+	local ok2, name2 = pcall(function()
+		return wezterm.mux.get_active_workspace()
+	end)
+	if ok2 and type(name2) == "string" and name2 ~= "" then
+		return name2
+	end
+	return nil
+end
+
+-- Directorio de trabajo del pane como ruta de sistema de archivos (nil si la
+-- metadata no está disponible). Soporta tanto objetos Url como strings.
+local function pane_cwd(pane)
+	local ok, cwd = pcall(function()
+		return pane:get_current_working_dir()
+	end)
+	if not ok or cwd == nil then
+		return nil
+	end
+	if type(cwd) == "string" then
+		return cwd:match("^file://[^/]*(/.*)$") or cwd
+	end
+	local ok_path, path = pcall(function()
+		return cwd.file_path
+	end)
+	if ok_path and type(path) == "string" and path ~= "" then
+		return path
+	end
+	local text = tostring(cwd)
+	return text:match("^file://[^/]*(/.*)$") or text
+end
+
+-- Etiqueta corta de una ruta: "~" para home, basename para todo lo demás.
+local function dir_label(path)
+	if not path then
+		return nil
+	end
+	local home = os.getenv("HOME")
+	if home and (path == home or path == home .. "/") then
+		return "~"
+	end
+	local name = path:match("([^/]+)/?$")
+	if not name or name == "" then
+		return "/"
+	end
+	return name
+end
+
+--------------------------------------------------------------------------------
+-- Rama git sin bloquear: git corre en segundo plano con
+-- wezterm.background_child_process() y escribe la respuesta en un archivo
+-- temporal que los ticks siguientes solo leen. Se cachea por directorio y las
+-- carpetas que no son repositorio reintentan con back-off exponencial.
+--------------------------------------------------------------------------------
+local TMP = os.getenv("TMPDIR") or "/tmp/"
+if TMP:sub(-1) ~= "/" then
+	TMP = TMP .. "/"
+end
+
+local GIT_POLLS_MAX = 5 -- ticks de espera por la respuesta en segundo plano
+local GIT_REFRESH = 120 -- reconsultar una rama conocida cada N ticks
+local GIT_RETRY_MIN = 60 -- primer reintento tras un fallo
+local GIT_RETRY_MAX = 600 -- techo del back-off (~10 min)
+
+local git_state = {} -- path -> { branch, inflight, polls, wait, misses, file }
+local git_dirs = 0
+local git_seq = 0 -- contador para nombres únicos de archivo temporal
+
+local function sh_quote(value)
+	return "'" .. tostring(value):gsub("'", "'\\''") .. "'"
+end
+
+local function git_branch(path)
+	local st = git_state[path]
+	if not st then
+		st = { branch = nil, inflight = false, polls = 0, wait = 0, misses = 0 }
+		git_state[path] = st
+		git_dirs = git_dirs + 1
+		if git_dirs > 128 then -- acotar memoria en sesiones largas
+			git_state = { [path] = st }
+			git_dirs = 1
+		end
+	end
+
+	if st.inflight then
+		local file = io.open(st.file, "r")
+		if file then
+			local answer = file:read("*l")
+			file:close()
+			os.remove(st.file)
+			os.remove(st.file .. ".part")
+			st.inflight = false
+			st.misses = 0
+			st.wait = GIT_REFRESH
+			st.branch = (answer and answer ~= "" and answer) or false
+		else
+			st.polls = st.polls + 1
+			if st.polls >= GIT_POLLS_MAX then
+				-- Sin respuesta: no es un repositorio (o git tardó demasiado).
+				os.remove(st.file .. ".part")
+				st.inflight = false
+				st.misses = st.misses + 1
+				st.wait = math.floor(math.min(GIT_RETRY_MIN * 2 ^ (st.misses - 1), GIT_RETRY_MAX))
+			end
+		end
+	elseif st.wait > 0 then
+		st.wait = st.wait - 1
+	else
+		git_seq = git_seq + 1
+		st.file = TMP .. "wezterm-branch-" .. git_seq .. ".txt"
+		-- Se escribe a .part y se renombra: el lector nunca ve un archivo a medias.
+		-- Si git falla (no es un repo), el propio script limpia su .part.
+		local script = "( git -C " .. sh_quote(path) .. " symbolic-ref --short HEAD 2>/dev/null"
+			.. " || git -C " .. sh_quote(path) .. " rev-parse --short HEAD 2>/dev/null )"
+			.. " > " .. sh_quote(st.file .. ".part")
+			.. " && mv -f " .. sh_quote(st.file .. ".part") .. " " .. sh_quote(st.file)
+			.. " || rm -f " .. sh_quote(st.file .. ".part")
+		local spawned = pcall(wezterm.background_child_process, { "/bin/sh", "-c", script })
+		if spawned then
+			st.inflight = true
+			st.polls = 0
+		else
+			st.wait = GIT_RETRY_MAX
+		end
+	end
+
+	if st.branch then
+		return st.branch
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- Batería: leída desde IOKit vía wezterm.battery_info(), pero solo cada varios
+-- ticks: el porcentaje no necesita una consulta por frame. Si no hay batería
+-- (o el API falla) simplemente no se pinta el segmento.
+--------------------------------------------------------------------------------
+local BATTERY_EVERY = 5 -- ticks entre lecturas
+local battery = { age = BATTERY_EVERY, pct = nil, state = nil }
+
+local function battery_status()
+	battery.age = battery.age + 1
+	if battery.age >= BATTERY_EVERY then
+		battery.age = 0
+		battery.pct = nil
+		battery.state = nil
+		local ok, list = pcall(wezterm.battery_info)
+		if ok and type(list) == "table" and type(list[1]) == "table" then
+			local info = list[1]
+			local state = string.lower(tostring(info.state or "unknown"))
+			-- "NotPresent" = equipo sin batería (p. ej. Mac de escritorio).
+			if type(info.state_of_charge) == "number" and state ~= "notpresent" then
+				battery.pct = math.floor(info.state_of_charge * 100 + 0.5)
+				battery.state = state
+			end
+		end
+	end
+	return battery.pct, battery.state
+end
+
+-- Construye una barra por lado. Cada segmento se registra con segment(); el
+-- separador "·" solo se inserta entre segmentos que salieron con contenido, de
+-- modo que nunca queda un separador colgando cuando falta información.
+local function new_bar()
+	local items = {}
+	cell(items, SB.strip, SB.strip, " ")
+	local count = 0
+	local function segment(build)
+		count = count + 1
+		if count > 1 then
+			separator(items)
+		end
+		build(items)
+	end
+	local function finish()
+		cell(items, SB.strip, SB.strip, " ")
+		return wezterm.format(items)
+	end
+	return segment, finish
+end
+
+-- El status bar. Todo el cuerpo va dentro de pcall: si algún API falta o un
+-- valor inesperado aparece, se registra en el log y la terminal sigue viva.
+wezterm.on("update-status", function(window, pane)
+	local ok, err = pcall(function()
+		local ws = workspace_name(window)
+		local cwd = pane_cwd(pane)
+		local dir = dir_label(cwd)
+		local branch = cwd and git_branch(cwd) or nil
+		local pct, state = battery_status()
+
+		-- Izquierda: workspace · directorio · rama git
+		local segment, finish = new_bar()
+		if ws then
+			segment(function(items)
+				cell(items, SB.chip, SB.purple, " " .. ws .. " ", true)
+			end)
+		end
+		if dir then
+			segment(function(items)
+				cell(items, SB.strip, SB.cyan, dir)
+			end)
+		end
+		if branch then
+			segment(function(items)
+				cell(items, SB.strip, SB.sep, "git:")
+				cell(items, SB.strip, SB.purple, branch)
+			end)
+		end
+		window:set_left_status(finish())
+
+		-- Derecha: fecha · hora · batería
+		local segment_r, finish_r = new_bar()
+		segment_r(function(items)
+			cell(items, SB.strip, SB.date, wezterm.strftime("%Y-%m-%d"))
+		end)
+		segment_r(function(items)
+			cell(items, SB.strip, SB.cyan, wezterm.strftime("%H:%M"), true)
+		end)
+		if pct then
+			segment_r(function(items)
+				cell(items, SB.strip, SB.sep, "bat ")
+				local low = pct < 20 and state ~= "charging"
+				cell(items, SB.strip, low and SB.warn or SB.green, pct .. "%", true)
+				if state == "charging" then
+					cell(items, SB.strip, SB.green, " charging")
+				elseif state == "full" then
+					cell(items, SB.strip, SB.sep, " full")
+				end
+			end)
+		end
+		window:set_right_status(finish_r())
+	end)
+
+	if not ok then
+		wezterm.log_error("status bar: " .. tostring(err))
+	end
+end)
+
+--------------------------------------------------------------------------------
+-- Command picker (plugin: abidibo/wezterm-cmdpicker)
+-- Paleta de comandos con búsqueda fuzzy: Ctrl+Shift+P abre un InputSelector con
+-- todos los keybindings (los tuyos y los 142 por defecto de WezTerm) y ejecuta
+-- el elegido. Se cachea en ~/Library/Application Support/wezterm/plugins.
+--------------------------------------------------------------------------------
+-- El require va protegido a propósito: si la caché del plugin no existe y no hay
+-- red, el config sigue cargando y solo se pierde este atajo.
+local picker_ok, cmdpicker = pcall(wezterm.plugin.require, "https://github.com/abidibo/wezterm-cmdpicker")
+if picker_ok and type(cmdpicker) == "table" then
+	-- Se llama DESPUÉS de definir los keybindings: hace un snapshot de config.keys
+	-- e inyecta el atajo del picker como último binding.
+	-- Para añadir comandos propios al buscador (sin tecla asignada), usa:
+	--   cmdpicker.register({ action = wezterm.action.SpawnCommandInNewTab(...), desc = "..." })
+	cmdpicker.apply_to_config(config, {
+		mods = "CTRL|SHIFT",
+		key = "p",
+		title = "Command Picker",
+		include_defaults = true, -- incluye los atajos por defecto de WezTerm
+		include_key_tables = false, -- sin tablas copy_mode/search_mode (más limpio)
+		fuzzy = true,
+	})
+else
+	wezterm.log_error("cmdpicker: no se pudo cargar el plugin: " .. tostring(cmdpicker))
+end
+
+return config

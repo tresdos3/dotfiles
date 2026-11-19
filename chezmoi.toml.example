@@ -1,0 +1,7 @@
+# Copy to ~/.config/chezmoi/chezmoi.toml on EACH machine.
+# bootstrap.sh creates this interactively on both macOS and Linux.
+
+[data]
+    # Available in templates as {{ .email }}.
+    # Never put actual secrets here — only non-secret values.
+    email = "you@example.com"

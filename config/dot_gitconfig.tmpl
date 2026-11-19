@@ -1,0 +1,25 @@
+# Managed by chezmoi — cross-platform (macOS + Linux)
+# Signing is intentionally disabled: no SSH/PGP signing key is required.
+[user]
+	name = LuisJSincpro
+	email = {{ .email }}
+[core]
+	excludesfile = {{ .chezmoi.homeDir }}/.gitignore_global
+{{- if eq .chezmoi.os "darwin" }}
+[difftool "sourcetree"]
+	cmd = opendiff \"$LOCAL\" \"$REMOTE\"
+	path =
+[mergetool "sourcetree"]
+	cmd = /Applications/Sourcetree.app/Contents/Resources/opendiff-w.sh \"$LOCAL\" \"$REMOTE\" -ancestor \"$BASE\" \"$MERGED\"
+	trustExitCode = true
+{{- end }}
+[commit]
+	template = {{ .chezmoi.homeDir }}/.stCommitMsg
+	gpgsign = false
+[filter "lfs"]
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+	required = true
+[safe]
+	directory = *

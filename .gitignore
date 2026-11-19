@@ -1,0 +1,31 @@
+# --- Secrets / credentials: never commit these -------------------------------
+id_*
+*.pem
+*.key
+*.ppk
+*.p12
+*.pfx
+.env
+.env.*
+credentials*
+*token*
+*secret*
+chezmoi.toml
+!chezmoi.toml.example
+
+# --- Collected chezmoi source lives in config/ (must be tracked) -------------
+# Avoid a nested git repo inside config/ — the kit repo IS the dotfiles repo.
+config/.git/
+
+# --- Backups and local scratch files ----------------------------------------
+*.bak
+*.bak.*
+*.backup-*
+*.tmp
+*.swp
+*.swo
+
+# --- OS / editor junk --------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
