@@ -33,7 +33,8 @@ eval "$(fnm env --use-on-cd --shell zsh)"
 # Rust / Cargo
 export PATH="$HOME/.cargo/bin:$PATH"
 
-. "$HOME/.local/bin/env"
+# uv environment — only present if the uv installer created this file
+[[ -f "$HOME/.local/bin/env" ]] && . "$HOME/.local/bin/env"
 
 # pnpm
 {{- if eq .chezmoi.os "darwin" }}

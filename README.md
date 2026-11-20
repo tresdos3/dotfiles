@@ -17,8 +17,8 @@ Personal Access Token** — no SSH keys are used or configured anywhere.
 | `install-fnm.sh` | Installs/upgrades fnm (Node version manager). Skips if already installed. |
 | `install-rust.sh` | Installs/upgrades Rust via rustup. Skips if already installed. |
 | `git-sync.sh` | Pull → auto-commit → push a git repo over HTTPS. |
-| `collect.sh` | Imports the 13 config entries into chezmoi safely (template-aware). |
-| `bootstrap.sh` | Full setup: installs missing apps + tools, then pulls and applies your dotfiles. |
+| `collect.sh` | Imports the 12 config entries into chezmoi safely (template-aware). |
+| `bootstrap.sh` | Full setup with interactive selection of apps/tools and dotfiles, then pull + apply. |
 | `chezmoiignore` | Reference copy of the ignore list written by `collect.sh`. |
 | `chezmoi.toml.example` | Example of the per-machine value (`email`) used by the templates. |
 | `TEMPLATE_PATCHES.md` | The exact macOS → Linux replacements for the seeded `*.tmpl` files. |
@@ -29,7 +29,7 @@ Personal Access Token** — no SSH keys are used or configured anywhere.
 Open a terminal and change into this folder first:
 
 ```sh
-cd ~/Documents/dotfiles-kit
+cd ~/Documents/dotfiles-kit   # or wherever this repo lives, e.g. ~/Documents/dotfiles
 ```
 
 Make the scripts executable **once** (after copying the folder or re-creating a
@@ -87,15 +87,15 @@ skipped.
 | `install-git.sh` | `--no-auth` (skip credential helper), `--help` |
 | `install-chezmoi.sh` | `--brew`, `--pkg` (Linux), `--script`, `--dir PATH`, `--force`, `--help` |
 | `install-fnm.sh` | `--dir PATH` (Linux), `--no-brew` (force binary on macOS), `--force`, `--help` |
-| `install-rust.sh` | `--profile minimal\|default\|full`, `--modify-path`, `--force`, `--help` |
+| `install-rust.sh` | `--force`, `--help` (plain `curl … \| sh` via rustup, default profile) |
 
 ### GitHub authentication (HTTPS, no SSH)
 
 `install-git.sh` sets:
 - global name/email (it shows current values first — press ENTER to keep one),
 - `commit.gpgsign false` globally, so commits never fail on a missing signing key,
-- `credential.helper osxkeychain` on macOS, or `libsecret` on Linux (install the
-  helper package if it isn't present).
+- `credential.helper osxkeychain` on macOS, or `oauth` on Linux (install
+  `git-credential-oauth` with apt), falling back to `libsecret`.
 
 Then create a **Personal Access Token**:
 GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)
@@ -172,32 +172,78 @@ Or from that directory: `../git-sync.sh` (copy `git-sync.sh` next to it first).
 ## Part 2 — On the other machine (Linux or macOS)
 
 **Requirements:** on macOS, Homebrew must be installed (https://brew.sh).
-On Linux, any supported package manager is enough.
+On Linux, any supported package manager is enough. On Ubuntu/Debian, WezTerm is
+installed from the official `apt.fury.io/wez` repository, which `bootstrap.sh`
+adds automatically when you select the WezTerm component.
 
 Copy `bootstrap.sh` (or the whole kit) there, then:
 
 ```sh
 chmod +x *.sh
 ./install-git.sh                    # install/configure git + HTTPS auth
-./bootstrap.sh https://github.com/YOUR_USER/dotfiles-kit.git
-# or, without Rust:
-./bootstrap.sh --no-rust https://github.com/YOUR_USER/dotfiles-kit.git
+./bootstrap.sh https://github.com/YOUR_USER/dotfiles.git
+# accept every menu default without prompts:
+./bootstrap.sh --yes https://github.com/YOUR_USER/dotfiles.git
+# keep the old behaviour of skipping Rust:
+./bootstrap.sh --no-rust https://github.com/YOUR_USER/dotfiles.git
 ```
 
-`bootstrap.sh` clones the kit repo into `~/Documents/dotfiles-kit`, creates
-`config/`, and writes `sourceDir = ".../config"` into
-`~/.config/chezmoi/chezmoi.toml`. Set `KIT_DIR=/custom/path` to clone elsewhere.
-Options: `--no-rust`, `-h` / `--help`. If you copy only `bootstrap.sh`, it still
-installs chezmoi, fnm and Rust on its own.
+### Choosing what to install
 
-The script:
-1. detects the OS and package manager (Homebrew on macOS),
-2. installs **only the missing packages** (already-installed apps are skipped),
-3. installs chezmoi / fnm / Rust via the standalone installers when available,
-4. clones the kit repo and writes `~/.config/chezmoi/chezmoi.toml`
-   (`sourceDir` + email),
-5. installs missing p10k / zsh plugins / pnpm / git-lfs,
-6. shows `chezmoi diff`, asks before `chezmoi apply`.
+`bootstrap.sh` shows **two interactive checklists before installing anything**.
+Press ENTER for the shown default, `y`/`n` to toggle one item, `a` for all,
+`x` for none.
+
+1. **Components to install**
+
+   | Component | Default | How it is installed |
+   |---|---|---|
+   | zsh | on | package manager |
+   | Git LFS | on | package manager + `git lfs install` |
+   | Neovim | on | package manager |
+   | fish | on | package manager |
+   | WezTerm | on | **apt.fury.io repo → apt** on Ubuntu/Debian, cask on macOS |
+   | JetBrains Mono font | on | package manager (skipped if already installed) |
+   | fnm + Node + pnpm | on | fnm installer, Node LTS, corepack |
+   | powerlevel10k | on | git clone |
+   | zsh plugins | on | git clone ×2 |
+   | Rust | on | plain `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+   | Git credential helper | on | `git-credential-oauth` (or libsecret) |
+   | uv | off | package manager |
+   | Ghostty | off | package manager |
+
+2. **Dotfiles to apply** — the selection is passed to `chezmoi diff` and
+   `chezmoi apply` as explicit targets, so unselected files are never touched.
+
+   | Group | Targets |
+   |---|---|
+   | zsh | `~/.zshrc`, `~/.zprofile`, `~/.p10k.zsh` |
+   | git | `~/.gitconfig`, `~/.gitignore_global`, `~/.hgignore_global`, `~/.stCommitMsg` |
+   | WezTerm | `~/.wezterm.lua` |
+   | Neovim | `~/.config/nvim` |
+   | Ghostty | `~/.config/ghostty` |
+   | fish | `~/.config/fish` |
+   | Warp | `~/.warp` (macOS only — warned about on Linux) |
+
+`--yes` accepts every default, `--no-rust` forces the Rust component off, and
+`-h` / `--help` shows usage. `collect.sh` is deliberately **not** involved in
+selection — it keeps working exactly as before on macOS.
+
+### Repo location
+
+`bootstrap.sh` reuses the checkout it lives in when that folder already has
+`config/` and `.git/` (so this repo can stay at `~/Documents/dotfiles`). When run
+from a standalone copy, it clones into `~/Documents/dotfiles-kit`. Set
+`KIT_DIR=/custom/path` to override. It writes `sourceDir = ".../config"` and
+`[data] email` into `~/.config/chezmoi/chezmoi.toml`.
+
+The script then:
+1. detects the OS and package manager,
+2. adds the WezTerm apt repo (Ubuntu/Debian) when selected,
+3. installs **only the selected packages that are missing**,
+4. installs chezmoi (always), then the selected tools,
+5. clones (or reuses) the repo and writes the chezmoi config,
+6. shows `chezmoi diff` for the selected dotfiles, asks, then applies them.
 
 Then open `nvim` once to bootstrap LazyVim plugins, and you're done.
 

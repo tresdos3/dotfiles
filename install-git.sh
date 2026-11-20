@@ -13,7 +13,8 @@
 #
 # It also disables commit signing globally (avoids failures from a missing SSH
 # signing key) and configures an HTTPS credential helper so GitHub works over
-# HTTPS with a Personal Access Token — no SSH keys involved.
+# HTTPS with a Personal Access Token — no SSH keys involved. On Linux it prefers
+# git-credential-oauth (OAuth login) and falls back to libsecret.
 
 set -euo pipefail
 
@@ -116,12 +117,15 @@ if [[ $SET_AUTH -eq 1 ]]; then
     git config --global credential.helper osxkeychain
     ok "credential.helper = osxkeychain (macOS Keychain)"
   else
-    if command -v git-credential-libsecret >/dev/null 2>&1 || \
+    if command -v git-credential-oauth >/dev/null 2>&1; then
+      git config --global credential.helper oauth
+      ok "credential.helper = oauth (Git credential helper for GitHub)"
+    elif command -v git-credential-libsecret >/dev/null 2>&1 || \
        [[ -f /usr/lib/git-core/git-credential-libsecret || -f /usr/libexec/git-core/git-credential-libsecret ]]; then
       git config --global credential.helper libsecret
       ok "credential.helper = libsecret"
     else
-      warn "libsecret helper not found — install 'git-credential-libsecret' / 'libsecret' for your distro"
+      warn "no credential helper found — on Ubuntu run: sudo apt install git-credential-oauth"
       warn "or run: git config --global credential.helper <helper-of-your-choice>"
     fi
   fi
