@@ -50,6 +50,11 @@ if command -v fnm >/dev/null 2>&1 && [[ $FORCE -eq 0 ]]; then
   exit 0
 fi
 
+# The official installer extracts a .zip and requires unzip.
+for dep in curl unzip; do
+  command -v "$dep" >/dev/null 2>&1 || fail "'$dep' is required to install fnm (on Ubuntu: sudo apt install $dep)"
+done
+
 TMP="$(mktemp)"
 if ! curl -fsSL https://fnm.vercel.app/install -o "$TMP"; then
   rm -f "$TMP"

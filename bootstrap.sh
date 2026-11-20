@@ -435,6 +435,11 @@ DATA="${XDG_DATA_HOME:-$HOME/.local/share}"
 
 # fnm + Node + pnpm via corepack
 if comp_on fnm; then
+  # The official fnm installer needs both curl and unzip to extract its zip.
+  if ! command -v unzip >/dev/null 2>&1; then
+    info "  Installing unzip (required by the fnm installer) ..."
+    ensure_cmd unzip unzip
+  fi
   if [[ -f "$BOOTSTRAP_DIR/install-fnm.sh" ]]; then
     bash "$BOOTSTRAP_DIR/install-fnm.sh" || warn "fnm installer failed — see https://fnm.vercel.app"
   elif command -v fnm >/dev/null 2>&1; then
@@ -447,7 +452,7 @@ if comp_on fnm; then
   export PATH="$HOME/.local/bin:$PATH"
 
   if command -v fnm >/dev/null 2>&1; then
-    fnm install lts >/dev/null 2>&1 && fnm default lts >/dev/null 2>&1 \
+    fnm install --lts >/dev/null 2>&1 && fnm default lts/* >/dev/null 2>&1 \
       && ok "Node LTS installed via fnm" \
       || warn "could not install Node LTS — run 'fnm install lts' manually"
     # Put the fnm-managed node on PATH for this shell, then enable pnpm.
@@ -456,9 +461,14 @@ if comp_on fnm; then
   if command -v corepack >/dev/null 2>&1; then
     corepack enable 2>/dev/null && corepack prepare pnpm@latest --activate 2>/dev/null \
       && ok "pnpm enabled via corepack" \
-      || warn "could not enable pnpm — run 'corepack enable && corepack prepare pnpm@latest --activate'"
-  else
-    warn "corepack not found — Node must be installed before pnpm can be enabled"
+      || warn "could not enable pnpm via corepack — falling back to npm"
+  fi
+  if ! command -v pnpm >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    npm install -g pnpm >/dev/null 2>&1 && ok "pnpm installed via npm" \
+      || warn "could not install pnpm — run 'npm install -g pnpm'"
+  fi
+  if ! command -v pnpm >/dev/null 2>&1; then
+    warn "pnpm not available — Node must be installed before pnpm can be enabled"
   fi
 fi
 

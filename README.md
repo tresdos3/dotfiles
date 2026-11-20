@@ -204,7 +204,7 @@ Press ENTER for the shown default, `y`/`n` to toggle one item, `a` for all,
    | fish | on | package manager |
    | WezTerm | on | **apt.fury.io repo → apt** on Ubuntu/Debian, cask on macOS |
    | JetBrains Mono font | on | package manager (skipped if already installed) |
-   | fnm + Node + pnpm | on | fnm installer, Node LTS, corepack |
+   | fnm + Node + pnpm | on | fnm installer (needs `curl` + `unzip`), Node LTS (via `fnm install --lts`), pnpm (corepack or npm) |
    | powerlevel10k | on | git clone |
    | zsh plugins | on | git clone ×2 |
    | Rust | on | plain `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
